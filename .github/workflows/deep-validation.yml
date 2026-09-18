@@ -70,7 +70,7 @@ jobs:
               [ref]$errors
             ) | Out-Null
             if ($errors.Count -gt 0) {
-              $errors | ForEach-Object { Write-Error "$file: $_" }
+              $errors | ForEach-Object { Write-Error "${file}: $_" }
               throw "PowerShell syntax validation failed for $file"
             }
           }
