@@ -1,4 +1,4 @@
-name: Playwright C# E2E
+name: Playwright C# Quality Pipeline
 
 on:
   push:
@@ -10,10 +10,19 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: playwright-csharp-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+
 jobs:
-  e2e:
-    name: ${{ matrix.browser }} E2E
+  ui-and-learning:
+    name: ${{ matrix.browser }} UI + Learning
     runs-on: ubuntu-latest
+    timeout-minutes: 25
+
     strategy:
       fail-fast: false
       matrix:
@@ -38,7 +47,7 @@ jobs:
         shell: pwsh
         run: src/PlaywrightSauceDemo.Tests/bin/Release/net8.0/playwright.ps1 install --with-deps ${{ matrix.browser }}
 
-      - name: Run E2E tests
+      - name: Run UI and learning tests
         env:
           SAUCE_BASE_URL: https://www.saucedemo.com
           SAUCE_USERNAME: standard_user
@@ -48,10 +57,22 @@ jobs:
           --configuration Release
           --no-build
           --settings runsettings/${{ matrix.browser }}.runsettings
+          --filter "TestCategory!=API"
           --logger "trx;LogFileName=${{ matrix.browser }}.trx"
           --results-directory TestResults/${{ matrix.browser }}
 
-      - name: Upload test results and failure evidence
+      - name: Add browser summary
+        if: always()
+        shell: bash
+        run: |
+          echo "## Playwright ${{ matrix.browser }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Suite: SauceDemo UI + 16-part learning examples" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Browser: ${{ matrix.browser }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Results: TestResults/${{ matrix.browser }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Failure evidence: screenshots, traces, console and network logs when applicable" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload browser results and evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -59,5 +80,54 @@ jobs:
           path: |
             TestResults/${{ matrix.browser }}/**/*
             **/evidence/**/*
+          if-no-files-found: ignore
+          retention-days: 14
+
+  api:
+    name: APIRequestContext Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore
+        run: dotnet restore PlaywrightSauceDemo.sln
+
+      - name: Build
+        run: dotnet build PlaywrightSauceDemo.sln --configuration Release --no-restore
+
+      - name: Run API tests
+        env:
+          API_BASE_URL: https://jsonplaceholder.typicode.com
+        run: >-
+          dotnet test PlaywrightSauceDemo.sln
+          --configuration Release
+          --no-build
+          --filter "TestCategory=API"
+          --logger "trx;LogFileName=api.trx"
+          --results-directory TestResults/api
+
+      - name: Add API summary
+        if: always()
+        shell: bash
+        run: |
+          echo "## Playwright APIRequestContext" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- API target: JSONPlaceholder" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Coverage: GET + POST + JSON validation" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload API results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-api-results
+          path: TestResults/api/**/*
           if-no-files-found: ignore
           retention-days: 14
