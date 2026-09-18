@@ -1,0 +1,27 @@
+# Build output
+bin/
+obj/
+TestResults/
+artifacts/
+playwright-report/
+
+# IDE
+.vs/
+.vscode/*.log
+.idea/
+*.user
+*.suo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test evidence
+evidence/
+traces/
+videos/
+
+# Local settings / secrets
+.env
+.env.*
+!.env.example
