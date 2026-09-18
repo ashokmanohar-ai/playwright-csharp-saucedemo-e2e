@@ -1,0 +1,195 @@
+name: Deep Framework Validation
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - "src/**"
+      - "runsettings/**"
+      - "scripts/**"
+      - ".github/workflows/deep-validation.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: playwright-deep-validation-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+  SAUCE_BASE_URL: https://www.saucedemo.com
+  SAUCE_USERNAME: standard_user
+  SAUCE_PASSWORD: secret_sauce
+  API_BASE_URL: https://jsonplaceholder.typicode.com
+
+jobs:
+  deep-validation:
+    name: Deep Framework Validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Restore
+        run: dotnet restore PlaywrightSauceDemo.sln
+
+      - name: Build with zero-warning expectation
+        run: dotnet build PlaywrightSauceDemo.sln --configuration Release --no-restore --warnaserror
+
+      - name: Install Chromium
+        shell: pwsh
+        run: src/PlaywrightSauceDemo.Tests/bin/Release/net8.0/playwright.ps1 install --with-deps chromium
+
+      - name: Validate Bash helper script syntax
+        run: bash -n scripts/setup.sh scripts/codegen-saucedemo.sh
+
+      - name: Validate PowerShell helper script syntax
+        shell: pwsh
+        run: |
+          $files = @(
+            "scripts/setup.ps1",
+            "scripts/run-headed.ps1",
+            "scripts/debug-test.ps1",
+            "scripts/codegen-saucedemo.ps1"
+          )
+          foreach ($file in $files) {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $file),
+              [ref]$tokens,
+              [ref]$errors
+            ) | Out-Null
+            if ($errors.Count -gt 0) {
+              $errors | ForEach-Object { Write-Error "$file: $_" }
+              throw "PowerShell syntax validation failed for $file"
+            }
+          }
+
+      - name: Validate Playwright developer commands
+        shell: pwsh
+        run: |
+          $pw = "src/PlaywrightSauceDemo.Tests/bin/Release/net8.0/playwright.ps1"
+          & $pw codegen --help
+          & $pw show-trace --help
+
+      - name: Run API tests
+        run: >-
+          dotnet test PlaywrightSauceDemo.sln
+          --configuration Release
+          --no-build
+          --filter "TestCategory=API"
+          --logger "trx;LogFileName=api-deep.trx"
+          --results-directory TestResults/deep-api
+
+      - name: Run UI and learning tests with parallel runsettings
+        run: >-
+          dotnet test PlaywrightSauceDemo.sln
+          --configuration Release
+          --no-build
+          --settings runsettings/parallel.runsettings
+          --filter "TestCategory!=API"
+          --logger "trx;LogFileName=parallel.trx"
+          --results-directory TestResults/parallel
+
+      - name: Validate headed execution under Xvfb
+        run: >-
+          xvfb-run -a pwsh ./scripts/run-headed.ps1
+          -Filter "Name~StandardUser_CanLogin"
+
+      - name: Validate optional video recording
+        env:
+          PW_VIDEO: "1"
+        run: >-
+          dotnet test PlaywrightSauceDemo.sln
+          --configuration Release
+          --no-build
+          --settings runsettings/chromium.runsettings
+          --filter "Name~StandardUser_CanCompletePurchase"
+          --logger "trx;LogFileName=video.trx"
+          --results-directory TestResults/video
+
+      - name: Assert video artifact exists
+        run: |
+          set -e
+          count=$(find . -type f -name '*.webm' | wc -l)
+          echo "Video files found: $count"
+          test "$count" -ge 1
+          find . -type f -name '*.webm' -print
+
+      - name: Force one expected failure to validate evidence pipeline
+        id: expected_failure
+        continue-on-error: true
+        env:
+          SAUCE_PASSWORD: intentionally-wrong-password
+        run: >-
+          dotnet test PlaywrightSauceDemo.sln
+          --configuration Release
+          --no-build
+          --settings runsettings/chromium.runsettings
+          --filter "Name~StandardUser_CanCompletePurchase"
+          --logger "trx;LogFileName=expected-failure.trx"
+          --results-directory TestResults/evidence-self-test
+
+      - name: Assert failure was actually produced
+        if: always()
+        run: |
+          echo "Expected-failure step outcome: ${{ steps.expected_failure.outcome }}"
+          test "${{ steps.expected_failure.outcome }}" = "failure"
+
+      - name: Assert failure evidence bundle exists
+        if: always()
+        run: |
+          set -e
+          echo "Evidence files:"
+          find . -type f -path '*evidence*' -print || true
+          test "$(find . -type f -path '*evidence*' -name '*.png' | wc -l)" -ge 1
+          test "$(find . -type f -path '*evidence*' -name '*_trace.zip' | wc -l)" -ge 1
+          test "$(find . -type f -path '*evidence*' -name '*_console.log' | wc -l)" -ge 1
+          test "$(find . -type f -path '*evidence*' -name '*_network.log' | wc -l)" -ge 1
+
+      - name: Check NuGet vulnerability advisories
+        shell: bash
+        run: |
+          set -o pipefail
+          dotnet list src/PlaywrightSauceDemo.Tests/PlaywrightSauceDemo.Tests.csproj package --vulnerable --include-transitive 2>&1 | tee vulnerability-audit.txt
+          if grep -qi "has the following vulnerable packages" vulnerability-audit.txt; then
+            echo "Vulnerable NuGet packages detected."
+            exit 1
+          fi
+
+      - name: Add deep-validation summary
+        if: always()
+        run: |
+          echo "## Deep Framework Validation" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Release build with warnings as errors" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Bash + PowerShell helper syntax" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Playwright Codegen + Trace Viewer commands" >> "$GITHUB_STEP_SUMMARY"
+          echo "- API tests" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Parallel runsettings" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Headed Chromium under Xvfb" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Optional video recording" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Expected-failure evidence bundle" >> "$GITHUB_STEP_SUMMARY"
+          echo "- NuGet vulnerability audit" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload deep-validation artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deep-validation-results
+          path: |
+            TestResults/**/*
+            **/evidence/**/*
+            vulnerability-audit.txt
+          if-no-files-found: ignore
+          retention-days: 14
