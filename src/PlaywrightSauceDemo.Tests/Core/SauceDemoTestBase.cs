@@ -1,4 +1,5 @@
 using Microsoft.Playwright.NUnit;
+using NUnit.Framework;
 using NUnit.Framework.Interfaces;
 
 namespace PlaywrightSauceDemo.Tests.Core;
