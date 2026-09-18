@@ -806,3 +806,179 @@ SauceDemo is a third-party demonstration application used for test-automation pr
 ## License
 
 MIT — see LICENSE.
+
+---
+
+## 31. 16-Part Implementation Map
+
+The repository now maps the complete Playwright C# basics series to executable examples, framework behavior, tooling, or CI/CD.
+
+| Part | Topic | Implementation |
+|---|---|---|
+| 1 | Introduction | This README + architecture/stack overview |
+| 2 | Setup & Installation | scripts/setup.ps1 and scripts/setup.sh |
+| 3 | First Test | Learning/Part03_FirstTestExamples.cs |
+| 4 | Locators | Learning/Part04_LocatorExamples.cs |
+| 5 | Actions | Learning/Part05_ActionExamples.cs |
+| 6 | Assertions | Learning/Part06_AssertionExamples.cs |
+| 7 | Auto-Waiting | Learning/Part07_AutoWaitingExamples.cs |
+| 8 | Test Hooks | Learning/Part08_HookExamples.cs + SauceDemoTestBase.cs |
+| 9 | Browser Context | Learning/Part09_BrowserContextExamples.cs |
+| 10 | Evidence | Screenshot + trace + console/network logs + optional video |
+| 11 | Debugging | scripts/debug-test.ps1 + headed runsettings |
+| 12 | Codegen | scripts/codegen-saucedemo.ps1 + codegen-saucedemo.sh |
+| 13 | Page Object Model | Pages/ + production tests |
+| 14 | API Testing | Tests/ApiTests.cs using Playwright APIRequestContext |
+| 15 | Parallel Execution | parallel.runsettings + Part15_ParallelExamples.cs |
+| 16 | Reporting & CI/CD | GitHub Actions UI/browser matrix + API job + TRX/artifacts |
+
+Detailed learning guide:
+
+    docs/PLAYWRIGHT_CSHARP_16_PART_GUIDE.md
+
+## 32. Learning-mode commands
+
+Run all dedicated learning examples in Chromium:
+
+    dotnet test --filter "TestCategory=Learning" --settings runsettings/chromium.runsettings
+
+Run only the production-style SauceDemo UI suite:
+
+    dotnet test --filter "TestCategory!=Learning&TestCategory!=API" --settings runsettings/chromium.runsettings
+
+Run APIRequestContext tests:
+
+    dotnet test --filter "TestCategory=API"
+
+Run with four NUnit workers:
+
+    dotnet test --settings runsettings/parallel.runsettings
+
+Run a headed smoke test:
+
+    ./scripts/run-headed.ps1
+
+Launch Playwright Codegen:
+
+    ./scripts/codegen-saucedemo.ps1
+
+## 33. Advanced failure evidence
+
+SauceDemoTestBase now starts Playwright tracing for every production-style UI test. Successful tests discard the trace; failed tests retain a diagnostic bundle.
+
+On failure, the framework captures:
+
+    evidence/
+      <test>_<timestamp>.png
+      <test>_<timestamp>_trace.zip
+      <test>_<timestamp>_console.log
+      <test>_<timestamp>_network.log
+
+This gives four complementary views:
+
+- screenshot: visual state at failure
+- trace: timeline, DOM snapshots, source and actions
+- console log: browser console and page errors
+- network log: request/response sequence and status codes
+
+Optional browser video is available without changing test code:
+
+PowerShell:
+
+    $env:PW_VIDEO="1"
+    dotnet test --filter "TestCategory=E2E"
+
+Bash:
+
+    PW_VIDEO=1 dotnet test --filter "TestCategory=E2E"
+
+Open a trace locally:
+
+    pwsh src/PlaywrightSauceDemo.Tests/bin/Debug/net8.0/playwright.ps1 show-trace <trace.zip>
+
+## 34. Real Playwright API testing
+
+The API module uses Playwright APIRequestContext directly rather than introducing a separate HTTP testing library.
+
+It includes:
+
+- GET /users/1
+- HTTP success validation
+- JSON field validation
+- POST /posts
+- request payload creation
+- status 201 validation
+- response-content validation
+
+The default public training API is:
+
+    https://jsonplaceholder.typicode.com
+
+It is deliberately separate from SauceDemo because SauceDemo does not expose a supported public API intended for this learning exercise.
+
+Override the target with:
+
+    API_BASE_URL=https://your-api.example.com dotnet test --filter "TestCategory=API"
+
+## 35. Browser-context and authentication-state learning
+
+Part 9 demonstrates a key Playwright capability beyond ordinary Selenium-style browser automation:
+
+    Browser
+       |
+       +-- Context A -> login as a user
+       |       |
+       |       +-- capture storage state
+       |
+       +-- Context B -> reuse storage state
+               |
+               +-- open authenticated inventory page
+
+The example keeps sessions isolated while showing how authentication state can be reused in a fresh context.
+
+## 36. Updated CI/CD architecture
+
+The GitHub Actions pipeline now has two independent quality paths.
+
+UI + learning:
+
+    Chromium
+    Firefox
+    WebKit
+       |
+       +-- restore
+       +-- build
+       +-- install selected browser
+       +-- run every non-API test
+       +-- publish TRX
+       +-- publish screenshots/traces/logs if present
+       +-- add GitHub job summary
+
+API:
+
+    APIRequestContext
+       |
+       +-- restore
+       +-- build
+       +-- run API category
+       +-- publish API TRX
+       +-- add GitHub job summary
+
+Workflow concurrency cancels superseded runs on the same branch, reducing wasted CI time while the repository evolves.
+
+## 37. Recommended portfolio walkthrough
+
+For a technical demo, present the repository in this order:
+
+1. README and architecture.
+2. Simple Part 3 test.
+3. Locator/action/assertion examples.
+4. SauceDemo Page Object Model.
+5. Complete checkout E2E flow.
+6. Browser-context/auth-state example.
+7. Failure screenshot + trace + logs.
+8. APIRequestContext tests.
+9. Parallel runsettings.
+10. Cross-browser GitHub Actions pipeline.
+
+This progression shows both learning depth and framework engineering rather than only a collection of UI scripts.
